@@ -38,6 +38,24 @@
 
         }
 
+        .back-arrow {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 48px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            z-index: 3;
+            user-select: none;
+            transition: color 0.3s ease;
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .back-arrow:hover {
+            color: rgba(255, 255, 255, 0.9);
+        }
+
         .hidden {
             opacity: 0;
             z-index: 1;
@@ -47,12 +65,13 @@
             opacity: 1;
             z-index: 2;
         }
+
         .minimap {
             position: relative;
-            bottom: -670px;
-            right: -840px;
-            width: 150px;
-            height: 120px;
+            bottom: -675px;
+            right: -850px;
+            width: 125px;
+            height: 100px;
             background: white;
             opacity: 0.4;
             border: 1px solid #000;
@@ -83,6 +102,72 @@
             text-align: center;
             color: #FFF
         }
+
+        .loader-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 5px solid #3498db;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .hidden-loader {
+            display: none;
+        }
+
+        .info-pane {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            max-width: 300px;
+            display: none;
+        }
+
+        .info-pane .close-button {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        .info-pane a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .info-pane a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
@@ -109,9 +194,20 @@
     </select>
     <input type="text" id="isbnSearch" placeholder="Search ISBN..." style="margin-left: 10px;">
     <button onclick="searchISBN()" style="margin-left: 5px;">Search</button>
+    <label style="margin-left: 10px;">
+        <input type="checkbox" id="mvtToggle" checked onchange="toggleMVTLayers()">
+        Range boundaries
+    </label>
+    <label style="margin-left: 10px;">
+        <input type="checkbox" id="textToggle" checked onchange="toggleMVTText()">
+        Range texts
+    </label>
 
     <div class="viewer-container">
         <div id="viewer-ld" class="visible">
+            <div id="loader-ld" class="loader-container">
+                <div class="loader"></div>
+            </div>
             <div id="minimap-ld" class="minimap"></div>
             <div id="scale-bar-ld" class="scale-bar">
                 <div id="scale-bar-text-ld" class="scale-bar-text"></div>
@@ -119,10 +215,15 @@
             </div>
         </div>
         <div id="viewer-hd" class="hidden">
+            <div class="back-arrow" onclick="goBackToLD()">&larr;</div>
             <div id="minimap-hd" class="minimap"></div>
             <div id="scale-bar-hd" class="scale-bar">
                 <div id="scale-bar-text-hd" class="scale-bar-text"></div>
                 <div id="scale-bar-graphic-hd" class="scale-bar-graphic"></div>
+            </div>
+            <div id="book-info-pane" class="info-pane">
+                <span class="close-button" onclick="closeInfoPane()">&#x2715;</span>
+                <div id="book-info-content"></div>
             </div>
         </div>
     </div>
@@ -131,8 +232,11 @@
 
     <script>
         const clamp = (num, min, max) => Math.min(Math.max(num, min), max)
+        DEBUG = false
+        //ROOT_IMAGES = "http://localhost:5556"
+        ROOT_IMAGES = "http://51.79.31.40:5555"
 
-        ROOT_IMAGES = "http://localhost:5556"
+        var displayText = true
 
         const datasets = [
             'all', 'cadal_ssno', 'cerlalc', 'duxiu_ssid', 'edsebk', 'gbooks',
@@ -185,13 +289,31 @@
 
         const getPixelColor = (info) => {
             const layer = info.sourceLayer
-            const { device } = layer.context
-            return device.readPixelsToArrayWebGL(layer.props.image, {
-                sourceX: info.bitmap.pixel[0],
-                sourceY: info.bitmap.pixel[1],
-                sourceWidth: 1,
-                sourceHeight: 1
-            });
+            if (layer) {
+                const { device } = layer.context
+                return device.readPixelsToArrayWebGL(layer.props.image, {
+                    sourceX: info.bitmap.pixel[0],
+                    sourceY: info.bitmap.pixel[1],
+                    sourceWidth: 1,
+                    sourceHeight: 1
+                });
+            }
+            return null
+        }
+
+        async function fetchOpenLibraryData(isbn) {
+            try {
+                const response = await fetch(`https://openlibrary.org/isbn/${isbn}.json`, {
+                    headers: {
+                        'User-Agent': 'ISBN-Explorer/1.0 - lasconic@gmail.com'
+                    }
+                });
+                if (!response.ok) return null;
+                return await response.json();
+            } catch (error) {
+                console.error('Error fetching OpenLibrary data:', error);
+                return null;
+            }
         }
 
         // --------------- HD ------------//
@@ -278,6 +400,69 @@
             return null;  // If no valid solution is found
         }
 
+        // Add this function before searchISBN
+        function showHDViewAndInfo(isbn12) {
+            const coords = findXYFromISBN(isbn12);
+            // Center the view on the ISBN
+            deckInstanceHD.setProps({
+                initialViewState: {
+                    ...INITIAL_VIEW_STATE_HD,
+                    target: coords,
+                    zoom: 2,
+                }
+            });
+
+
+            // Switch to HD view if not already visible
+            const viewerHD = document.getElementById('viewer-hd');
+            const viewerLD = document.getElementById('viewer-ld');
+            viewerHD.className = 'visible';
+            viewerLD.className = 'hidden';
+
+
+            // Simulate a click at the center coordinates to show info
+            setTimeout(() => {
+                // Simulate a click at the center coordinates
+                const pixel = deckInstanceHD.layerManager.context.viewport.project(coords);
+                const info = {
+                    coordinate: coords,
+                    x: pixel[0],
+                    y: pixel[1],
+                    picked: true,
+                    bitmap: false
+                };
+                onClickHD(info);
+            }, 1200);
+        }
+
+        // Add the searchISBN function
+        function searchISBN() {
+            const searchInput = document.getElementById('isbnSearch');
+            let isbn = searchInput.value.replace(/[-\s]/g, ''); // Remove hyphens and spaces
+
+            // Validate ISBN length
+            if (isbn.length !== 12 && isbn.length !== 13) {
+                alert('Please enter a valid 12 or 13-digit ISBN');
+                return;
+            }
+
+            // Convert to 12 digits if 13 digits provided
+            let isbn12;
+            if (isbn.length === 13) {
+                isbn12 = parseInt(isbn.slice(0, -1));
+            } else {
+                isbn12 = parseInt(isbn);
+            }
+
+            // Validate ISBN range
+            if (isbn12 < 978000000000 || isbn12 > 979999999999) {
+                alert('ISBN must be in the valid range (978 or 979)');
+                return;
+            }
+
+            showHDViewAndInfo(isbn12);
+        }
+
         function updateScaleBarHD(zoom) {
             const scaleBarText = document.getElementById('scale-bar-text-hd');
             const scale = Math.pow(2, zoom);
@@ -294,9 +479,9 @@
             views: [new deck.OrthographicView({ id: 'minimap-view-hd' })],
             initialViewState: {
                 target: [dimensions_hd.width / 2, dimensions_hd.height / 2, 0],
-                zoom: - 2,
-                minZoom: - 2,
-                maxZoom: - 2
+                zoom: -8.64, // (50000/125px))
+                minZoom: -9,
+                maxZoom: -8
             },
             coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
             controller: false,
@@ -321,8 +506,8 @@
             ]
         });
 
-        const onClickHD = (info, event) => {
-            originalInfo = info
+        const onClickHD = async (info, event) => {
+            countryInfo = null
             if (!info.bitmap) {
                 const pickInfos = deckInstanceHD.pickMultipleObjects({
                     x: info.x,
@@ -333,7 +518,8 @@
                 for (const pickInfo of pickInfos) {
                     if (pickInfo.layer.id.startsWith("tile-layer-hd")) {
                         info = pickInfo;
-                        break;
+                    } else if (pickInfo.layer.id == "MVTLayer_HD") {
+                        countryInfo = pickInfo;
                     }
                 }
                 if (!info.bitmap) return null;
@@ -342,14 +528,53 @@
             // do no click on red and black
             if ((pixelColor[0] == 255 && pixelColor[1] == 0) || (pixelColor[0] == 0 && pixelColor[1] == 0 && pixelColor[2] == 0))
                 return;
+
             const isbn = findIsbnFromXY(info.coordinate[0], info.coordinate[1])
             if (isbn) {
                 const cleanISBN = addISBNCheckDigit(isbn);
-                window.open(
-                    `https://annas-archive.org/search?q=%22isbn13:${cleanISBN}%22`,
-                    "_blank"
-                );
+                const formattedISBN = cleanISBN.toString().slice(0, -1) + '-' + cleanISBN.toString().slice(-1);
+
+                // Create initial content
+                // Create initial content with cover image
+                let content = `<div style="display: flex; gap: 10px;">`;
+                content += `<img src="https://covers.openlibrary.org/b/isbn/${cleanISBN}-S.jpg" 
+                        width="100" height="125" 
+                        style="object-fit: contain; background-color: #f0f0f0;" 
+                        onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22125%22><rect width=%22100%22 height=%22125%22 fill=%22%23f0f0f0%22/><text x=%2250%22 y=%2262%22 font-size=%2212%22 text-anchor=%22middle%22>No cover</text><text x=%2250%22 y=%2274%22 font-size=%2212%22 text-anchor=%22middle%22>available</text></svg>'"/>`;
+                content += `<div>`;
+                content += `ISBN: ${formattedISBN}<br/>`;
+                content += `Country: ${getCountryFromISBN(isbn)}<br/>`;
+                if (pixelColor)
+                    content += `Status: ${getStatusFromColor(pixelColor)}<br/>`;
+                if (countryInfo && countryInfo.object.properties.type == "publisher") {
+                    content += `Publisher: ${countryInfo.object.properties.label}<br/>`;
+                }
+                content += `<a href="https://annas-archive.org/search?q=%22isbn13:${cleanISBN}%22" target="_blank">View on Anna's Archive</a><br/>`;
+                content += `<div id="ol-data-${cleanISBN}">Loading OpenLibrary data...</div>`;
+                content += `</div>`;
+
+                // Show the pane with initial content
+                const pane = document.getElementById('book-info-pane');
+                const contentDiv = document.getElementById('book-info-content');
+                contentDiv.innerHTML = content;
+                pane.style.display = 'block';
+
+                // Fetch and update OpenLibrary data
+                const olData = await fetchOpenLibraryData(cleanISBN);
+                const olDataElement = document.getElementById(`ol-data-${cleanISBN}`);
+                if (olDataElement && olData) {
+                    olDataElement.innerHTML = `
+                Title: ${olData.title || 'N/A'}<br/>
+                Published: ${olData.publish_date || 'N/A'}<br/>
+            `;
+                } else if (olDataElement) {
+                    olDataElement.innerHTML = 'No OpenLibrary data available';
+                }
             }
+        }
+        function closeInfoPane() {
+            const pane = document.getElementById('book-info-pane');
+            pane.style.display = 'none';
         }
 
         const getStatusFromColor = (pixel) => {
@@ -366,14 +591,14 @@
 
         const INITIAL_VIEW_STATE_HD = {
             target: [dimensions_hd.width / 2, dimensions_hd.height / 2],
-            zoom: 0,
+            zoom: 2,
             minZoom: -1, //0
             maxZoom: 4   // 2
         };
 
         var current_zoom_hd = INITIAL_VIEW_STATE_HD.zoom
         const getTooltipHD = (info) => {
-            originalInfo = info
+            countryInfo = null;
             if (!deckInstanceHD || !info.picked) {
                 return null;
             }
@@ -387,7 +612,8 @@
                 for (const pickInfo of pickInfos) {
                     if (pickInfo.layer.id.startsWith("tile-layer-hd")) {
                         info = pickInfo;
-                        break;
+                    } else if (pickInfo.layer.id == "MVTLayer_HD") {
+                        countryInfo = pickInfo;
                     }
                 }
                 if (!info.bitmap) return null;
@@ -402,15 +628,15 @@
             const datasetSelect = document.getElementById('datasetSelect');
             const selectedDataset = datasetSelect.value;
 
-            var html = `<div>Color: ${pixelColor}, (${x}; ${y})<br/>`
+            var html = ""
+            if (DEBUG)
+                html += `<div>Color: ${pixelColor}, (${x}; ${y})<br/>`
 
             html += `ISBN:${formattedISBN}<br/>`
             html += `Country: ${getCountryFromISBN(isbn)}<br/>`
+            if (countryInfo && countryInfo.object.properties.type == "publisher")
+                html += `Publisher : ${countryInfo.object.properties.label}<br/>`
             html += `Status : ${getStatusFromColor(pixelColor)}<br/>`
-            if (originalInfo.layer.id == "MVTLayer_HD") {
-                if (originalInfo.object.properties.type == "publisher")
-                    html += `Publisher : ${originalInfo.object.properties.label}<br/>`
-            }
 
             return {
                 html: html,
@@ -457,35 +683,46 @@
             },
         }));
 
-
+        function truncateString(str, maxLength) {
+            if (!str) return '';
+            if (str.length <= maxLength) return str;
+            return str.slice(0, maxLength) + '\u2026';
+        }
         const layerMVT_HD = new deck.MVTLayer({
             id: 'MVTLayer_HD',
             data: [
-                `${ROOT_IMAGES}/vt_hd/{z}/{x}/{y}.pbf`
+                `${ROOT_IMAGES}/vt_hd_9/{z}/{x}/{y}.pbf`
             ],
             getFillColor: [0, 0, 50, 0],
             getLineColor: [0, 0, 255],
             getLineWidth: 0,
             lineWidthMinPixels: 1,
             stroked: true,
-            maxZoom: 2,
-            tileSize: 3125,
+            tileSize: 400,
             minZoom: 0,
+            maxZoom: 2,
+            //zoomOffset: 7,
             autoHighlight: true,
             highlightColor: [0, 0, 255, 50],
             pickable: true,
             extent: [0, 0, dimensions_hd.width, dimensions_hd.height],
             getText: f => {
-                const polygonWidth = f.properties.width
-                //if (polygonWidth / Math.pow(2, current_zoom_hd) < f.properties.label.length * 5)
-                //    return ""
-                return f.properties.label
+                if (!this.displayText)
+                    return
+                const polygonWidth = f.properties.width;
+                text = truncateString(f.properties.label, 20)
+                //if (polygonWidth * Math.pow(2, current_zoom_hd) < text.length * 5 * 4)
+                return text
             },
-            getTextSize: 12,
+            getTextSize: f => {
+                const polygonWidth = f.properties.width;
+                return polygonWidth / 48
+            },
             textCharacterSet: "auto",
             getTextColor: f => { if (f.properties.type == "country") { return [0, 255, 255] } else { return [0, 0, 255] } },
             textFontFamily: 'Arial',
             pointType: "text",
+            textSizeUnits: "common"
         });
 
         const allLayersHD = [...tileLayersHD, layerMVT_HD];
@@ -540,13 +777,10 @@
         });
 
         //----------------------LD ---------------------------
-        MAX_SQUARE_SIZE = 32;
         const dimensions_ld = {
-            width: 1000 * MAX_SQUARE_SIZE,
-            height: 800 * MAX_SQUARE_SIZE,
+            width: 1000,
+            height: 800,
             tileSize: 512,
-            max_directory: 6,
-            zoom_full: 1,  // depends on MAX_SQUARE_SIZE and tile size, directory with full size (for 32/256 = 2, 32/512 = 1)
         }
 
         /* Functions for cluster, LD */
@@ -606,7 +840,7 @@
 
         function updateScaleBarLD(zoom) {
             const scaleBarText = document.getElementById('scale-bar-text-ld');
-            const scale = Math.pow(2, zoom - (dimensions_ld.zoom_full - dimensions_ld.max_directory));
+            const scale = Math.pow(2, zoom);
             const barWidthPixels = 100; // Width of the scale bar in screen pixels
             const isbnCount = Math.round((barWidthPixels / scale) * (50 * 50)); // 50*50 ISBNs per block
 
@@ -624,9 +858,9 @@
             views: [new deck.OrthographicView({ id: 'minimap-view-ld' })],
             initialViewState: {
                 target: [dimensions_ld.width / 2, dimensions_ld.height / 2, 0],
-                zoom: dimensions_ld.zoom_full - dimensions_ld.max_directory - 2,
-                minZoom: dimensions_ld.zoom_full - dimensions_ld.max_directory - 2,
-                maxZoom: dimensions_ld.zoom_full - dimensions_ld.max_directory - 2
+                zoom: -3,
+                minZoom: -3,
+                maxZoom: -3
             },
             coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
             controller: false,
@@ -653,8 +887,8 @@
 
 
         const onClickLD = (info, event) => {
-            const x = Math.floor(info.coordinate[0] / MAX_SQUARE_SIZE);
-            const y = Math.floor(info.coordinate[1] / MAX_SQUARE_SIZE);
+            const x = Math.floor(info.coordinate[0]);
+            const y = Math.floor(info.coordinate[1]);
             const range = calculateISBNRangeLD(x, y);
             const isbnCenter = range.start + ((50 * 50) / 2);
             // get x, y in HD
@@ -674,18 +908,18 @@
             viewerLD.className = 'hidden';
         }
 
-
+        var loaded = false
         const tileLayersLD = datasets.map(dataset => new deck.TileLayer({
             id: `tile-layer-ld-${dataset}`,
             getTileData: (tile) => {
                 const { x, y, z } = tile.index;
                 //console.log('getTileData', x, y, z)
-                var full_url = `${ROOT_IMAGES}/images/${dataset}_fractal_cluster_t_files/${dimensions_ld.max_directory + z}/${x}_${y}.png`
+                var full_url = `${ROOT_IMAGES}/images/${dataset}_cluster_t_files/${z}/${x}_${y}.png`
                 //console.log('full url', full_url)
                 return loaders.load(full_url);
             },
-            minZoom: dimensions_ld.zoom_full - dimensions_ld.max_directory,
-            maxZoom: 0,
+            minZoom: 0,
+            maxZoom: 5,
             tileSize: dimensions_ld.tileSize,
             extent: [0, 0, dimensions_ld.width, dimensions_ld.height],
             coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
@@ -707,15 +941,21 @@
                     ],
                 });
             },
+            onViewportLoad: () => {
+                if (!loaded) {
+                    document.getElementById('loader-ld').classList.add('hidden-loader');
+                    loaded = true;
+                }
+            }
         }));
 
 
 
         const INITIAL_VIEW_STATE_LD = {
             target: [dimensions_ld.width / 2, dimensions_ld.height / 2, 0],
-            zoom: dimensions_ld.zoom_full - dimensions_ld.max_directory,
-            minZoom: dimensions_ld.zoom_full - dimensions_ld.max_directory,
-            maxZoom: 2
+            zoom: 0,
+            minZoom: 0,
+            maxZoom: 5 + 2,
         };
 
         var current_zoom_ld = INITIAL_VIEW_STATE_LD.zoom
@@ -741,16 +981,18 @@
             }
             document.querySelectorAll('#viewer-ld div.deck-tooltip')[1].parentElement.parentElement.style["overflow"] = "visible"
             const pixelColor = getPixelColor(info)
-            const x = Math.floor(info.coordinate[0] / MAX_SQUARE_SIZE);
-            const y = Math.floor(info.coordinate[1] / MAX_SQUARE_SIZE);
+            const x = Math.floor(info.coordinate[0]);
+            const y = Math.floor(info.coordinate[1]);
             const range = calculateISBNRangeLD(x, y);
             const density = calculateDensity(pixelColor);
             const datasetSelect = document.getElementById('datasetSelect');
             const selectedDataset = datasetSelect.value;
 
-            var html = `<div>Color: ${pixelColor}, (${x}; ${y})<br/>`
+            var html = ""
+            if (DEBUG)
+                html += `<div>Color: ${pixelColor}, (${x}; ${y})<br/>`
 
-            html += `ISBN:${range.start} - ${range.end}<br/>`
+            html += `From ${range.start} to ${range.end}<br/>`
             html += `Country: ${getCountryFromISBN(range.start)}<br/>`
             if (originalInfo.layer.id == "MVTLayer_LD") {
                 if (originalInfo.object.properties.type == "publisher")
@@ -771,31 +1013,33 @@
                     boxShadow: '0 0 4px rgba(0,0,0,0.2)'
                 }
             };
-
         };
 
 
         const layerMVT_LD = new deck.MVTLayer({
             id: 'MVTLayer_LD',
             data: [
-                `${ROOT_IMAGES}/vt_ld/{z}/{x}/{y}.pbf`
+                `${ROOT_IMAGES}/vt_ld_7/{z}/{x}/{y}.pbf`
             ],
             getFillColor: [0, 0, 50, 0],
             getLineColor: [0, 0, 255],
             getLineWidth: 0,
             lineWidthMinPixels: 1,
             stroked: true,
-            maxZoom: 0,
-            tileSize: 500,
-            minZoom: -5,
+            tileSize: 1000,
+            minZoom: 0,
+            maxZoom: 6,
+            zoomOffset: 1,
             autoHighlight: true,
             highlightColor: [0, 0, 255, 50],
             pickable: true,
             extent: [0, 0, dimensions_ld.width, dimensions_ld.height],
             getText: f => {
+                if (!this.displayText)
+                    return
                 const polygonWidth = f.properties.width
-                if (polygonWidth / Math.pow(2, -current_zoom_ld) < f.properties.label.length * 5)
-                    return ""
+                if (polygonWidth * Math.pow(2, current_zoom_ld) < f.properties.label.length * 5 * 32)
+                    return null
                 return f.properties.label
             },
             getTextSize: 12,
@@ -852,7 +1096,9 @@
                 });
             },
             onClick: onClickLD,
-            onLoad: () => updateScaleBarLD(INITIAL_VIEW_STATE_LD.zoom)
+            onLoad: () => {
+                updateScaleBarLD(INITIAL_VIEW_STATE_LD.zoom);
+            }
         });
 
 
@@ -878,6 +1124,72 @@
                 ]
             });
         });
+
+        function goBackToLD() {
+            const viewerHD = document.getElementById('viewer-hd');
+            viewerHD.className = 'hidden';
+            const viewerLD = document.getElementById('viewer-ld');
+            viewerLD.className = 'visible';
+        }
+
+        function toggleMVTLayers() {
+            const mvtEnabled = document.getElementById('mvtToggle').checked;
+            const textToggle = document.getElementById('textToggle');
+
+            // Enable/disable text toggle based on MVT toggle
+            textToggle.disabled = !mvtEnabled;
+
+            // Update HD layers
+            deckInstanceHD.setProps({
+                layers: allLayersHD.map(layer => {
+                    if (layer.id === 'MVTLayer_HD') {
+                        return layer.clone({
+                            visible: mvtEnabled
+                        });
+                    }
+                    return layer;
+                })
+            });
+
+            // Update LD layers
+            deckInstanceLD.setProps({
+                layers: allLayersLD.map(layer => {
+                    if (layer.id === 'MVTLayer_LD') {
+                        return layer.clone({
+                            visible: mvtEnabled
+                        });
+                    }
+                    return layer;
+                })
+            });
+        }
+
+        function toggleMVTText() {
+            this.displayText = document.getElementById('textToggle').checked;
+            // Update HD layers
+            deckInstanceHD.setProps({
+                layers: allLayersHD.map(layer => {
+                    if (layer.id === 'MVTLayer_HD') {
+                        return layer.clone({
+                            visible: true
+                        });
+                    }
+                    return layer;
+                })
+            });
+
+            // Update LD layers
+            deckInstanceLD.setProps({
+                layers: allLayersLD.map(layer => {
+                    if (layer.id === 'MVTLayer_LD') {
+                        return layer.clone({
+                            visible: true
+                        });
+                    }
+                    return layer;
+                })
+            });
+        }
 
 
     </script>
