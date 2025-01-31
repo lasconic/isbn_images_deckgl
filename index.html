@@ -141,11 +141,10 @@
 
         .info-pane {
             position: absolute;
-            top: 20px;
-            right: 20px;
+            top: 0px;
+            right: 0px;
             background: white;
-            padding: 15px;
-            border-radius: 4px;
+            padding: 10px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
             z-index: 1000;
             max-width: 300px;
@@ -409,7 +408,7 @@
                 initialViewState: {
                     ...INITIAL_VIEW_STATE_HD,
                     target: coords,
-                    zoom: 2,
+                    zoom: 3,
                 }
             });
 
@@ -592,9 +591,9 @@
 
         const INITIAL_VIEW_STATE_HD = {
             target: [dimensions_hd.width / 2, dimensions_hd.height / 2],
-            zoom: 2,
+            zoom: 3,
             minZoom: -1, //0
-            maxZoom: 4   // 2
+            maxZoom: 5   // 3
         };
 
         var current_zoom_hd = INITIAL_VIEW_STATE_HD.zoom
@@ -660,7 +659,7 @@
                 return loaders.load(full_url);
             },
             minZoom: 0,
-            maxZoom: 2,
+            maxZoom: 3,
             tileSize: dimensions_hd.tileSize,
             extent: [0, 0, dimensions_hd.width, dimensions_hd.height],
             coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
@@ -725,6 +724,8 @@
             pointType: "text",
             textSizeUnits: "common"
         });
+
+
 
         const allLayersHD = [...tileLayersHD, layerMVT_HD];
 
@@ -899,7 +900,7 @@
                 initialViewState: {
                     ...INITIAL_VIEW_STATE_HD,
                     target: coords,
-                    zoom: 2, // Set to maximum zoom
+                    zoom: 3, // Set to maximum zoom
                 }
             });
             // Transform viewer-ld into minimap
